@@ -1,0 +1,259 @@
+version: "3.8"
+
+x-logging: &logging
+  logging:
+    driver: loki
+    options:
+      loki-url: "http://host.docker.internal:9001/loki/api/v1/push"
+
+services:
+  nginx:
+    <<: *logging
+    image: nginx:latest
+    restart: on-failure
+    ports:
+      - 8090:80
+    expose:
+      - 80
+      - 443
+    volumes:
+      - ~/.nginx/nginx.conf:/etc/nginx/nginx.conf
+    networks:
+      - eike_network
+
+  elasticsearch:
+    <<: *logging
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.13.3
+    container_name: docker_elasticsearch
+    restart: on-failure
+    environment:
+      - bootstrap.memory_lock=true
+      - cluster.name=docker-cluster
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-XX:UseAVX=1 -Xms1g -Xmx1g
+    ulimits:
+      memlock:
+        hard: -1
+        soft: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    expose:
+      - 9200
+    networks:
+      - eike_network
+
+  kibana:
+    <<: *logging
+    image: docker.elastic.co/kibana/kibana:7.13.3
+    container_name: docker_kibana
+    restart: on-failure
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - 5601:5601
+    expose:
+      - 5601
+    networks:
+      - eike_network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: on-failure
+    command: --config.file=/etc/prometheus/prometheus.yml && --storage.tsdb.path=/data/prometheus
+    depends_on:
+      - loki
+    volumes:
+      - ~/.prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus:/data/prometheus
+    ports:
+      - 9090:9090
+    expose:
+      - 9090
+    networks:
+      - eike_network
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: on-failure
+    depends_on:
+      - prometheus
+    ports:
+      - 9100:9100
+    expose:
+      - 9100
+    networks:
+      - eike_network
+
+  loki:
+    container_name: loki
+    image: grafana/loki:latest
+    restart: on-failure
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ~/.loki/config.yaml:/etc/loki/local-config.yaml
+      - loki:/data/loki
+    ports:
+      - 9001:9001
+    expose:
+      - 9001
+    networks:
+      - eike_network
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    restart: on-failure
+    depends_on:
+      - loki
+      - prometheus
+    volumes:
+      - ~/.grafana/grafana.ini:/etc/grafana/grafana.ini
+      - grafana_data:/var/lib/grafana
+    ports:
+      - 9000:9000
+    expose:
+      - 9000
+    networks:
+      - eike_network
+
+  zookeeper:
+    <<: *logging
+    container_name: zookeeper
+    image: wurstmeister/zookeeper:latest
+    restart: on-failure
+    depends_on:
+      - loki
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 22181:2181
+    expose:
+      - 22181
+    networks:
+      - eike_network
+
+  kafka:
+    <<: *logging
+    container_name: kafka
+    image: wurstmeister/kafka:latest
+    restart: on-failure
+    depends_on:
+      - loki
+      - zookeeper
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: localhost
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    ports:
+      - 29092:29092
+    expose:
+      - 29092
+    networks:
+      - eike_network
+
+  postgres:
+    <<: *logging
+    container_name: postgres
+    image: postgres:13.3
+    restart: on-failure
+    depends_on:
+      - loki
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./lib/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=foobar123
+    ports:
+      - 5432:5432
+    expose:
+      - 5432
+    networks:
+      - eike_network
+
+  redis:
+    <<: *logging
+    container_name: redis
+    image: redis:latest
+    restart: on-failure
+    depends_on:
+      - loki
+    ports:
+      - 6379:6379
+    expose:
+      - 6379
+    networks:
+      - eike_network
+
+  em_accounts:
+    <<: *logging
+    container_name: em_accounts
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - gem_cache:/usr/local/bundle/gems
+    env_file: .env
+    environment:
+      RAILS_ENV: development
+      DATABASE_NAME: "${DATABASE_NAME}"
+      DATABASE_USER: "${DATABASE_USER}"
+      DATABASE_PASSWORD: "${DATABASE_PASSWORD}"
+      DATABASE_PORT: "${DATABASE_PORT}"
+      DATABASE_HOST: "${DATABASE_HOST}"
+      REDIS_HOST: "${REDIS_HOST}"
+    depends_on:
+      - elasticsearch
+      - grafana
+      - kafka
+      - loki
+      - postgres
+      - redis
+    ports:
+      - 3000:3000
+    expose:
+      - 3000
+    networks:
+      - eike_network
+
+  em_sidekiq:
+    container_name: em_sidekiq
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - gem_cache:/usr/local/bundle/gems
+    env_file: .env
+    environment:
+      RAILS_ENV: development
+    depends_on:
+      - em_accounts
+      - loki
+      - postgres
+      - redis
+    networks:
+      - eike_network
+    entrypoint: ./lib/scripts/sidekiq-entrypoint.sh
+
+volumes:
+  esdata:
+  gem_cache:
+  grafana_data:
+  loki:
+  postgres_data:
+  prometheus:
+
+networks:
+  eike_network:
+    driver: bridge
