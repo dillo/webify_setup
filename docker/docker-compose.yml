@@ -4,7 +4,7 @@ x-logging: &logging
   logging:
     driver: loki
     options:
-      loki-url: "http://host.docker.internal:9001/loki/api/v1/push"
+      loki-url: http://host.docker.internal:9001/loki/api/v1/push
 
 services:
   nginx:
@@ -70,7 +70,7 @@ services:
     depends_on:
       - loki
     volumes:
-      - ~/.prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus:/data/prometheus
     ports:
       - 9090:9090
