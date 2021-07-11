@@ -37,7 +37,7 @@ services:
         hard: -1
         soft: -1
     volumes:
-      - esdata:/usr/share/elasticsearch/data
+      - elasticsearch_data:/usr/share/elasticsearch/data
     ports:
       - 9200:9200
     expose:
@@ -194,9 +194,9 @@ services:
     networks:
       - webify
 
-  em_accounts:
+  webify_accounts:
     <<: *logging
-    container_name: em_accounts
+    container_name: webify_accounts
     build:
       context: .
       dockerfile: Dockerfile
@@ -226,8 +226,8 @@ services:
     networks:
       - webify
 
-  em_sidekiq:
-    container_name: em_sidekiq
+  webify_sidekiq:
+    container_name: webify_sidekiq
     build:
       context: .
       dockerfile: Dockerfile
@@ -238,16 +238,16 @@ services:
     environment:
       RAILS_ENV: development
     depends_on:
-      - em_accounts
+      - webify_accounts
       - loki
       - postgres
       - redis
     networks:
       - webify
-    entrypoint: ./lib/scripts/sidekiq-entrypoint.sh
+    entrypoint: ./scripts/sidekiq-entrypoint.sh
 
 volumes:
-  esdata:
+  elasticsearch_data:
   gem_cache:
   grafana_data:
   loki:
