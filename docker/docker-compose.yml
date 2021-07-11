@@ -17,7 +17,7 @@ services:
       - 80
       - 443
     volumes:
-      - ~/.nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/nginx.conf:/etc/nginx/nginx.conf
     networks:
       - eike_network
 
