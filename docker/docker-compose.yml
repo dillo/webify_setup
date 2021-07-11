@@ -115,7 +115,7 @@ services:
       - loki
       - prometheus
     volumes:
-      - ~/.grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./config/grafana.ini:/etc/grafana/grafana.ini
       - grafana_data:/var/lib/grafana
     ports:
       - 9000:9000
